@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Dict
 import openai
 
 class DB:
@@ -10,13 +10,13 @@ class DB:
             # if does not exist, create index
             pinecone.create_index(
                 source,
-                dimension=len(res['data'][0]['embedding']),
+                dimension=1536,
                 metric='cosine',
                 metadata_config={'indexed': ['channel_id', 'published']}
             )
         self.index = pinecone.Index(source)
 
-    def upsert_batch(self, meta_batch, embeds):
+    def upsert_batch(self, meta_batch: Dict[str, str], embeds):
         ids_batch = [x['id'] for x in meta_batch]
         # cleanup metadata
         meta_batch = [{
@@ -36,7 +36,6 @@ class DB:
         res = self.index.query(vector, top_k=top_k, include_metadata=True)
         print(res)
         return [x['metadata']['text'] for x in res['matches']]
-
 
 
 openai.api_key = open('openai.key', 'r').readlines()[0].strip()
@@ -76,7 +75,7 @@ embed_model = "text-embedding-ada-002"
 api_key = os.getenv("PINECONE_API_KEY") or "PINECONE_API_KEY"
 env = os.getenv("PINECONE_ENVIRONMENT") or "PINECONE_ENVIRONMENT"
 index_name = 'openai-youtube-transcriptions'
-db = DB(index_name, api_key, env)
+db = DB(index_name, api_key=api_key, env=env)
 
 from tqdm.auto import tqdm
 from time import sleep
