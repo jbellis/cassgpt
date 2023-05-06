@@ -1,5 +1,45 @@
-# get API key from top-right dropdown on OpenAI website
-openai.api_key = os.getenv("OPENAI_API_KEY") or "OPENAI_API_KEY"
+import os
+from typing import List
+import openai
+
+class DB:
+    def __init__(self, source, **kwargs):
+        import pinecone
+        pinecone.init(**kwargs)
+        if source not in pinecone.list_indexes():
+            # if does not exist, create index
+            pinecone.create_index(
+                source,
+                dimension=len(res['data'][0]['embedding']),
+                metric='cosine',
+                metadata_config={'indexed': ['channel_id', 'published']}
+            )
+        self.index = pinecone.Index(source)
+
+    def upsert_batch(self, meta_batch, embeds):
+        ids_batch = [x['id'] for x in meta_batch]
+        # cleanup metadata
+        meta_batch = [{
+            'start': x['start'],
+            'end': x['end'],
+            'title': x['title'],
+            'text': x['text'],
+            'url': x['url'],
+            'published': x['published'],
+            'channel_id': x['channel_id']
+        } for x in meta_batch]
+        to_upsert = list(zip(ids_batch, embeds, meta_batch))
+        # upsert to Pinecone
+        self.index.upsert(vectors=to_upsert)
+
+    def query(self, vector, top_k) -> List[str]:
+        res = self.index.query(vector, top_k=top_k, include_metadata=True)
+        print(res)
+        return [x['metadata']['text'] for x in res['matches']]
+
+
+
+openai.api_key = open('openai.key', 'r').readlines()[0].strip()
 
 openai.Engine.list()  # check we have authenticated
 from datasets import load_dataset
@@ -12,6 +52,7 @@ new_data = []
 window = 20  # number of sentences to combine
 stride = 4  # number of sentences to 'stride' over, used to create overlap
 
+print('loading data')
 for i in tqdm(range(0, len(data), stride)):
     i_end = min(len(data)-1, i+window)
     if data[i]['title'] != data[i_end]['title']:
@@ -30,28 +71,12 @@ for i in tqdm(range(0, len(data), stride)):
         'channel_id': data[i]['channel_id']
     })
 
-import pinecone
 
+embed_model = "text-embedding-ada-002"
 api_key = os.getenv("PINECONE_API_KEY") or "PINECONE_API_KEY"
 env = os.getenv("PINECONE_ENVIRONMENT") or "PINECONE_ENVIRONMENT"
-
-pinecone.init(api_key=api_key, enviroment=env)
-pinecone.whoami()
 index_name = 'openai-youtube-transcriptions'
-# check if index already exists (it shouldn't if this is first time)
-if index_name not in pinecone.list_indexes():
-    # if does not exist, create index
-    pinecone.create_index(
-        index_name,
-        dimension=len(res['data'][0]['embedding']),
-        metric='cosine',
-        metadata_config={'indexed': ['channel_id', 'published']}
-    )
-
-# connect to index
-index = pinecone.Index(index_name)
-# view index stats
-index.describe_index_stats()
+db = DB(index_name, api_key, env)
 
 from tqdm.auto import tqdm
 from time import sleep
@@ -62,8 +87,6 @@ for i in tqdm(range(0, len(new_data), batch_size)):
     # find end of batch
     i_end = min(len(new_data), i+batch_size)
     meta_batch = new_data[i:i_end]
-    # get ids
-    ids_batch = [x['id'] for x in meta_batch]
     # get texts to encode
     texts = [x['text'] for x in meta_batch]
     # create embeddings (try-except added to avoid RateLimitError)
@@ -72,6 +95,7 @@ for i in tqdm(range(0, len(new_data), batch_size)):
     except:
         done = False
         while not done:
+            print("Rate limit error, waiting 5 seconds...")
             sleep(5)
             try:
                 res = openai.Embedding.create(input=texts, engine=embed_model)
@@ -79,48 +103,27 @@ for i in tqdm(range(0, len(new_data), batch_size)):
             except:
                 pass
     embeds = [record['embedding'] for record in res['data']]
-    # cleanup metadata
-    meta_batch = [{
-        'start': x['start'],
-        'end': x['end'],
-        'title': x['title'],
-        'text': x['text'],
-        'url': x['url'],
-        'published': x['published'],
-        'channel_id': x['channel_id']
-    } for x in meta_batch]
-    to_upsert = list(zip(ids_batch, embeds, meta_batch))
-    # upsert to Pinecone
-    index.upsert(vectors=to_upsert)
-# Markdown Cell
+    db.upsert_batch(meta_batch, embeds)
+
 # Now we search, for this we need to create a _query vector_ `xq`:
-res = openai.Embedding.create(
-    input=[query],
-    engine=embed_model
+query = (
+        "Which training method should I use for sentence transformers when " +
+        "I only have pairs of related sentences?"
 )
-
-# retrieve from Pinecone
-xq = res['data'][0]['embedding']
-
-# get relevant contexts (including the questions)
-res = index.query(xq, top_k=2, include_metadata=True)
-res
-limit = 3750
-
-def retrieve(query):
+def embedding_of(vector):
     res = openai.Embedding.create(
         input=[query],
         engine=embed_model
     )
+    return res['data'][0]['embedding']
 
-    # retrieve from Pinecone
-    xq = res['data'][0]['embedding']
+# get relevant contexts (including the questions)
+print(db.query(embedding_of(query), 2))
+limit = 3750
 
-    # get relevant contexts
-    res = index.query(xq, top_k=3, include_metadata=True)
-    contexts = [
-        x['metadata']['text'] for x in res['matches']
-    ]
+def retrieve(query):
+    xq = embedding_of(query)
+    contexts = db.query(xq, top_k=3)
 
     # build our prompt with the retrieved contexts included
     prompt_start = (
@@ -146,8 +149,22 @@ def retrieve(query):
                 prompt_end
             )
     return prompt
-# first we retrieve relevant items from Pinecone
+
+# first we retrieve relevant items from the database
 query_with_contexts = retrieve(query)
 # then we complete the context-infused query
+def complete(prompt):
+    # query text-davinci-003
+    res = openai.Completion.create(
+        engine='text-davinci-003',
+        prompt=prompt,
+        temperature=0,
+        max_tokens=400,
+        top_p=1,
+        frequency_penalty=0,
+        presence_penalty=0,
+        stop=None
+    )
+    return res['choices'][0]['text'].strip()
 complete(query_with_contexts)
 
