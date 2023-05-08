@@ -1,51 +1,99 @@
 import os
+from time import sleep
+from cassandra.cluster import Cluster
+from cassandra.query import SimpleStatement
 from typing import List, Dict
 import openai
+from tqdm.auto import tqdm
+from datasets import load_dataset
+from cassandra.marshal import float_pack, float_unpack
 
+
+def _pack_bytes(vector: List[float]) -> bytes:
+    return b''.join(float_pack(x) for x in vector)
+
+def _unpack_bytes(bytes: bytes) -> List[float]:
+    return [float_unpack(bytes[i:i+4]) for i in range(0, len(bytes), 4)]
+        
 class DB:
-    def __init__(self, source, **kwargs):
-        import pinecone
-        pinecone.init(**kwargs)
-        if source not in pinecone.list_indexes():
-            # if does not exist, create index
-            pinecone.create_index(
-                source,
-                dimension=1536,
-                metric='cosine',
-                metadata_config={'indexed': ['channel_id', 'published']}
-            )
-        self.index = pinecone.Index(source)
+    def __init__(self, keyspace: str, table: str, **kwargs):
+        self.keyspace = keyspace
+        self.table = table
+        self.cluster = Cluster(**kwargs)
+        self.session = self.cluster.connect()
 
-    def upsert_batch(self, meta_batch: Dict[str, str], embeds):
-        ids_batch = [x['id'] for x in meta_batch]
-        # cleanup metadata
-        meta_batch = [{
-            'start': x['start'],
-            'end': x['end'],
-            'title': x['title'],
-            'text': x['text'],
-            'url': x['url'],
-            'published': x['published'],
-            'channel_id': x['channel_id']
-        } for x in meta_batch]
-        to_upsert = list(zip(ids_batch, embeds, meta_batch))
-        # upsert to Pinecone
-        self.index.upsert(vectors=to_upsert)
+        # Create keyspace if not exists
+        self.session.execute(
+            f"""
+            CREATE KEYSPACE IF NOT EXISTS {keyspace}
+            WITH REPLICATION = {{ 'class': 'SimpleStrategy', 'replication_factor': 1 }}
+            """
+        )
+
+        # Create table if not exists
+        self.session.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {keyspace}.{table} (
+            id text PRIMARY KEY,
+            start text,
+            end text,
+            title text,
+            text text,
+            url text,
+            published text,
+            channel_id text,
+            embedding VECTOR<float, [1536]>);
+            """
+        )
+
+        # Create SAI index if not exists
+        sai_index_name = f"{table}_embedding_idx"
+        self.session.execute(
+            f"""
+            CREATE CUSTOM INDEX IF NOT EXISTS {sai_index_name} ON {keyspace}.{table} (embedding)
+            USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'
+            WITH OPTIONS = {{ 'analyzer_class': 'org.apache.cassandra.index.sai.analyzer.Float32Analyzer',
+            'distance_function': 'cosine' }}
+            """
+        )
+
+    def upsert_batch(self, meta_batch: List[Dict[str, str]], embeds: List[List[float]]):
+        for meta, embed in zip(meta_batch, embeds):
+            query = SimpleStatement(
+                f"""
+                INSERT INTO {self.keyspace}.{self.table}
+                (id, start, end, title, text, url, published, channel_id, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+            )
+            self.session.execute(
+                query, (
+                    meta['id'],
+                    meta['start'],
+                    meta['end'],
+                    meta['title'],
+                    meta['text'],
+                    meta['url'],
+                    meta['published'],
+                    meta['channel_id'],
+                    _pack_bytes(embed)
+                )
+            )
 
     def query(self, vector, top_k) -> List[str]:
-        res = self.index.query(vector, top_k=top_k, include_metadata=True)
-        print(res)
-        return [x['metadata']['text'] for x in res['matches']]
+        query = SimpleStatement(
+            f"SELECT * FROM {self.keyspace}.{self.table} WHERE embedding ANN OF ? LIMIT {top_k};"
+        )
+        res = self.session.execute(query, (vector,))
+        results = [row.text for row in res]
+        print(results)
+        return results
 
 
-openai.api_key = open('openai.key', 'r').readlines()[0].strip()
-
-openai.Engine.list()  # check we have authenticated
-from datasets import load_dataset
+openai.api_key = open('openai.key', 'r').splitlines()[0]
+print(openai.Engine.list())  # check we have authenticated
 
 data = load_dataset('jamescalam/youtube-transcriptions', split='train')
-
-from tqdm.auto import tqdm
 
 new_data = []
 window = 20  # number of sentences to combine
@@ -72,13 +120,7 @@ for i in tqdm(range(0, len(data), stride)):
 
 
 embed_model = "text-embedding-ada-002"
-api_key = os.getenv("PINECONE_API_KEY") or "PINECONE_API_KEY"
-env = os.getenv("PINECONE_ENVIRONMENT") or "PINECONE_ENVIRONMENT"
-index_name = 'openai-youtube-transcriptions'
-db = DB(index_name, api_key=api_key, env=env)
-
-from tqdm.auto import tqdm
-from time import sleep
+db = DB("demo", "youtube_transcriptions")
 
 batch_size = 100  # how many embeddings we create and insert at once
 
@@ -109,9 +151,9 @@ query = (
         "Which training method should I use for sentence transformers when " +
         "I only have pairs of related sentences?"
 )
-def embedding_of(vector):
+def embedding_of(text: str) -> List[float]:
     res = openai.Embedding.create(
-        input=[query],
+        input=[text],
         engine=embed_model
     )
     return res['data'][0]['embedding']
