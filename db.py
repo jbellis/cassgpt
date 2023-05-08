@@ -50,8 +50,7 @@ class DB:
             """
         )
 
-    def upsert_batch(self, meta_batch: List[Dict[str, Any]], embeds: List[List[float]]):
-        for meta, vector in zip(meta_batch, embeds):
+    def upsert_one(self, data):
             query = SimpleStatement(
                 f"""
                 INSERT INTO {self.keyspace}.{self.table}
@@ -61,17 +60,23 @@ class DB:
             )
             self.session.execute(
                 query, (
-                    meta['id'],
-                    meta['start'],
-                    meta['end'],
-                    meta['title'],
-                    meta['text'],
-                    meta['url'],
-                    meta['published'],
-                    meta['channel_id'],
-                    _pack_bytes(vector)
+                    data['id'],
+                    data['start'],
+                    data['end'],
+                    data['title'],
+                    data['text'],
+                    data['url'],
+                    data['published'],
+                    data['channel_id'],
+                    data['embedding']
                 )
             )
+
+
+    def upsert_batch(self, meta_batch: List[Dict[str, Any]], embeds: List[List[float]]):
+        for meta, vector in zip(meta_batch, embeds):
+            d = meta.copy()
+            d['embedding'] = _pack_bytes(vector)
 
     def query(self, vector: List[float], top_k: int) -> List[str]:
         query = SimpleStatement(
