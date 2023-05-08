@@ -3,18 +3,29 @@ import json
 from cassandra.cluster import Cluster
 from db import DB
 from tqdm.auto import tqdm
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
+thread_local_storage = threading.local()
+
+def get_db_handle():
+    if not hasattr(thread_local_storage, 'db_handle'):
+        thread_local_storage.db_handle = DB('demo', 'youtube_transcriptions')
+    return thread_local_storage.db_handle
+
+def upsert_row(row):
+    db = get_db_handle()
+    row['embedding'] = base64.b64decode(row['embedding'])
+    db.upsert_one(row)
 
 def main():
-    db = DB('demo', 'youtube_transcriptions')
-
+    get_db_handle() # let one thread create the table + index
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
 
-    for row in tqdm(data):
-        # Convert base64 back to blob
-        row['embedding'] = base64.b64decode(row['embedding'])
-        db.upsert_one(row)
+    num_threads = 8
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        list(tqdm(executor.map(upsert_row, data), total=len(data)))
 
     print('Data imported from youtube_transcriptions.json')
 
