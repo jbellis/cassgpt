@@ -1,4 +1,6 @@
+import argparse
 import os
+import sys
 from time import sleep
 from typing import Any, List, Dict
 import openai
@@ -12,9 +14,12 @@ from ai import embedding_of_many, embedding_of, complete
 openai.api_key = open('openai.key', 'r').read().splitlines()[0]
 embed_model = "text-embedding-ada-002"
 db = DB("demo", "youtube_transcriptions")
-data_load_required = False
 
-if data_load_required:
+parser = argparse.ArgumentParser(description="Retrieve data and generate answers")
+parser.add_argument('--load_data', action='store_true', help="Load data if required")
+args = parser.parse_args()
+
+if args.load_data:
     data = load_dataset('jamescalam/youtube-transcriptions', split='train')
 
     new_data = []
@@ -54,10 +59,11 @@ if data_load_required:
         db.upsert_batch(meta_batch, embeds)
 
 # Now we search
-query = (
-        "Which training method should I use for sentence transformers when " +
-        "I only have pairs of related sentences?"
-)
+query = f"Which training method should I use for sentence transformers when " + \
+        f"I only have pairs of related sentences?"
+
+print(f'Query? (enter to use default)\n\nDefault:\n{query}\n\n> ', end='')
+query = sys.stdin.readline().strip() or query
 
 def enrich(query):
     # get relevant contexts (including the questions) and add them to the openai prompt
@@ -89,4 +95,4 @@ query_with_contexts = enrich(query)
 # then we complete the context-infused query
 print(query_with_contexts)
 response = complete(query_with_contexts)
-print(f'After enriching with youtube context, the answer is: {response}')
+print(f'Answer: {response}')
