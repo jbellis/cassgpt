@@ -2,7 +2,7 @@ import os
 from time import sleep
 from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement
-from typing import List, Dict
+from typing import Any, List, Dict
 import openai
 from tqdm.auto import tqdm
 from datasets import load_dataset
@@ -35,14 +35,14 @@ class DB:
             f"""
             CREATE TABLE IF NOT EXISTS {keyspace}.{table} (
             id text PRIMARY KEY,
-            start text,
-            end text,
+            start float,
+            end float,
             title text,
             text text,
             url text,
             published text,
             channel_id text,
-            embedding VECTOR<float, [1536]>);
+            embedding FLOAT VECTOR[1536]);
             """
         )
 
@@ -52,18 +52,16 @@ class DB:
             f"""
             CREATE CUSTOM INDEX IF NOT EXISTS {sai_index_name} ON {keyspace}.{table} (embedding)
             USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'
-            WITH OPTIONS = {{ 'analyzer_class': 'org.apache.cassandra.index.sai.analyzer.Float32Analyzer',
-            'distance_function': 'cosine' }}
             """
         )
 
-    def upsert_batch(self, meta_batch: List[Dict[str, str]], embeds: List[List[float]]):
-        for meta, embed in zip(meta_batch, embeds):
+    def upsert_batch(self, meta_batch: List[Dict[str, Any]], embeds: List[List[float]]):
+        for meta, vector in zip(meta_batch, embeds):
             query = SimpleStatement(
                 f"""
                 INSERT INTO {self.keyspace}.{self.table}
                 (id, start, end, title, text, url, published, channel_id, embedding)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
             )
             self.session.execute(
@@ -76,22 +74,23 @@ class DB:
                     meta['url'],
                     meta['published'],
                     meta['channel_id'],
-                    _pack_bytes(embed)
+                    _pack_bytes(vector)
                 )
             )
 
-    def query(self, vector, top_k) -> List[str]:
+    def query(self, vector: List[float], top_k: int) -> List[str]:
         query = SimpleStatement(
-            f"SELECT * FROM {self.keyspace}.{self.table} WHERE embedding ANN OF ? LIMIT {top_k};"
+            f"SELECT id, start, end, text FROM {self.keyspace}.{self.table} WHERE embedding ANN OF %s LIMIT %s"
         )
-        res = self.session.execute(query, (vector,))
-        results = [row.text for row in res]
-        print(results)
-        return results
+        res = self.session.execute(query, (_pack_bytes(vector), top_k))
+        rows = [row for row in res]
+        print('\n'.join(repr(row) for row in rows))
+        return [row.text for row in rows]
 
 
-openai.api_key = open('openai.key', 'r').splitlines()[0]
-print(openai.Engine.list())  # check we have authenticated
+openai.api_key = open('openai.key', 'r').read().splitlines()[0]
+embed_model = "text-embedding-ada-002"
+db = DB("demo", "youtube_transcriptions")
 
 data = load_dataset('jamescalam/youtube-transcriptions', split='train')
 
@@ -117,13 +116,11 @@ for i in tqdm(range(0, len(data), stride)):
         'published': data[i]['published'],
         'channel_id': data[i]['channel_id']
     })
-
-
-embed_model = "text-embedding-ada-002"
-db = DB("demo", "youtube_transcriptions")
+print(f"Created {len(new_data)} new entries from {len(data)} original entries")
 
 batch_size = 100  # how many embeddings we create and insert at once
 
+print('generating embeddings')
 for i in tqdm(range(0, len(new_data), batch_size)):
     # find end of batch
     i_end = min(len(new_data), i+batch_size)
@@ -158,13 +155,12 @@ def embedding_of(text: str) -> List[float]:
     )
     return res['data'][0]['embedding']
 
-# get relevant contexts (including the questions)
-print(db.query(embedding_of(query), 2))
-limit = 3750
-
 def retrieve(query):
+    # get relevant contexts (including the questions) and add them to the openai prompt
+    limit = 3750
     xq = embedding_of(query)
     contexts = db.query(xq, top_k=3)
+    print(f"Retrieved {len(contexts)} contexts after asking for 3")
 
     # build our prompt with the retrieved contexts included
     prompt_start = (
@@ -175,21 +171,14 @@ def retrieve(query):
         f"\n\nQuestion: {query}\nAnswer:"
     )
     # append contexts until hitting limit
-    for i in range(1, len(contexts)):
+    for i in range(1, len(contexts) + 1):
         if len("\n\n---\n\n".join(contexts[:i])) >= limit:
-            prompt = (
-                prompt_start +
-                "\n\n---\n\n".join(contexts[:i-1]) +
-                prompt_end
-            )
+            prompt_middle = "\n\n---\n\n".join(contexts[:i-1])
             break
-        elif i == len(contexts)-1:
-            prompt = (
-                prompt_start +
-                "\n\n---\n\n".join(contexts) +
-                prompt_end
-            )
-    return prompt
+    else:
+        prompt_middle = "\n\n---\n\n".join(contexts)
+
+    return prompt_start + prompt_middle + prompt_end
 
 # first we retrieve relevant items from the database
 query_with_contexts = retrieve(query)
@@ -207,5 +196,6 @@ def complete(prompt):
         stop=None
     )
     return res['choices'][0]['text'].strip()
-complete(query_with_contexts)
-
+print(query_with_contexts)
+response = complete(query_with_contexts)
+print(f'After enriching with youtube context, the answer is: {response}')
