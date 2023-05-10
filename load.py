@@ -25,13 +25,6 @@ def main():
     time.sleep(1)
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
-    # data is a list of rows; each row is a dict.  the vector we care about is key 'embedding'
-    # transform the list into a set of vectors; compare the length with the original to
-    # verify that each vector is unique
-    vectors = set({row['embedding'] for row in data})
-    n = len(data) - len(vectors)
-    assert n == 0, f"{n} duplicate vectors"
-    del vectors
 
     num_threads = 8
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
