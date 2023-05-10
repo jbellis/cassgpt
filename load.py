@@ -5,6 +5,7 @@ from db import DB
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import time
 
 thread_local_storage = threading.local()
 
@@ -19,9 +20,18 @@ def upsert_row(row):
     db.upsert_one(row)
 
 def main():
+    print("Waiting for Cassandra schema")
     get_db_handle() # let one thread create the table + index
+    time.sleep(1)
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
+    # data is a list of rows; each row is a dict.  the vector we care about is key 'embedding'
+    # transform the list into a set of vectors; compare the length with the original to
+    # verify that each vector is unique
+    vectors = set({row['embedding'] for row in data})
+    n = len(data) - len(vectors)
+    assert n == 0, f"{n} duplicate vectors"
+    del vectors
 
     num_threads = 8
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
