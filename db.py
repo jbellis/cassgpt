@@ -1,14 +1,7 @@
 from typing import Any, Dict, List
 from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement
-from cassandra.marshal import float_pack, float_unpack
 
-
-def _pack_bytes(vector: List[float]) -> bytes:
-    return b''.join(float_pack(x) for x in vector)
-
-def _unpack_bytes(bytes: bytes) -> List[float]:
-    return [float_unpack(bytes[i:i+4]) for i in range(0, len(bytes), 4)]
 
 class DB:
     def __init__(self, keyspace: str, table: str, **kwargs):
@@ -76,13 +69,14 @@ class DB:
     def upsert_batch(self, meta_batch: List[Dict[str, Any]], embeds: List[List[float]]):
         for meta, vector in zip(meta_batch, embeds):
             d = meta.copy()
-            d['embedding'] = _pack_bytes(vector)
+            d['embedding'] = vector
+            self.upsert_one(d)
 
     def query(self, vector: List[float], top_k: int) -> List[str]:
         query = SimpleStatement(
             f"SELECT id, start, end, text FROM {self.keyspace}.{self.table} WHERE embedding ANN OF %s LIMIT %s"
         )
-        res = self.session.execute(query, (_pack_bytes(vector), top_k))
+        res = self.session.execute(query, (vector, top_k))
         rows = [row for row in res]
         # print('\n'.join(repr(row) for row in rows))
         return [row.text for row in rows]

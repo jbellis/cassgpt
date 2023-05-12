@@ -1,4 +1,4 @@
-cassandra_driver==3.27.0
+cassandra_driver
 datasets==2.12.0
 openai==0.27.6
 tqdm==4.65.0
