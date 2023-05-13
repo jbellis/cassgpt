@@ -27,3 +27,14 @@ This only needs to be done once.
 Once the dataset is loaded, the program will prompt you for a question; it will find the most
 relevant context from the transcriptions using Cassandra vector search, and feed the resulting
 context + question to OpenAI to generate an answer to your query.
+
+Assumes Cassandra is running on localhost, hack the source if it's somewhere else.
+
+## Need to start over?
+Instead of rebuilding the embeddings from scratch (slow!), dump them from Cassandra and
+re-load them into a fresh database.
+
+`python dump.py`
+`python load.py`
+
+Also assumes Cassandra is running on localhost.
