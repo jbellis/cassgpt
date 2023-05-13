@@ -19,7 +19,7 @@ this branch: https://github.com/datastax/cassandra/tree/cep-vsearch
 `pip install -r requirements.txt` from this source tree.
 
 ## Usage
-`python gen-qa-openai.py [--load-data]`
+`python gen-qa-openai.py [--load_data]`
 
 Specifying --load-data will will download the dataset, merge the transcriptions into larger chunks, generate embeddings for each chunk using OpenAI's text-embedding-ada-002 model, and insert the chunks and embeddings into the database.  This will take around twenty minutes and cost about $5 as of May 2023.
 This only needs to be done once.
