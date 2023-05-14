@@ -11,6 +11,7 @@ this branch: https://github.com/datastax/cassandra/tree/cep-vsearch
     - `ant jar -Dno-checkstyle=true` *maybe* required if one gets checkstyle related errors.
   - ⚠️ !Note! This is a prerelease and uses `FLOAT VECTOR[N]` syntax for declaring a vector column.
     This will change in the near future.
+- JDK 11.  Exactly 11.
 - Python driver with vector support from this branch: https://github.com/datastax/python-driver/tree/cep-vsearch
   - TLDR `git clone`, `python setup.py install`
   - You will be able to run cqlsh with vector support if you additionally
