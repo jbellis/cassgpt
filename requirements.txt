@@ -1,4 +1,4 @@
-cassandra_driver
+cassandra-driver @ git+https://github.com/datastax/python-driver.git@cep-vsearch
 datasets==2.12.0
 openai==0.27.6
 tqdm==4.65.0

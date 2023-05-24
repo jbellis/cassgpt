@@ -12,9 +12,7 @@ this branch: https://github.com/datastax/cassandra/tree/cep-vsearch
     This will change in the near future.
 - JDK 11.  Exactly 11.
 - You will be able to run cqlsh with vector support if you run `bin/cqlsh` from the cassandra source root
-- Python driver with vector support from this branch: https://github.com/datastax/python-driver/tree/cep-vsearch
-  - TLDR `pip install git+https://github.com/datastax/python-driver.git@cep-vsearch#egg=cassandra-driver` (or) `git clone`, `python setup.py install`
-- You can install the other Python dependencies for cassgpt by running 
+- You can install the Python dependencies for cassgpt by running 
 `pip install -r requirements.txt` from this source tree.
 
 ## Usage
