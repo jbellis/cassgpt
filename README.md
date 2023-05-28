@@ -6,10 +6,8 @@ This program uses OpenAI's GPT-3 to generate answers to your questions based on 
 
 - OpenAI API key, stored in file `openai.key`
 - Cassandra database supporting vector search. Currently that means you need to build and run 
-this branch: https://github.com/datastax/cassandra/tree/cep-vsearch
-  - TLDR `git clone`, `git checkout cep-vsearch`, `ant jar`, `bin/cassandra -f`
-  - ⚠️ !Note! This is a prerelease and uses `FLOAT VECTOR[N]` syntax for declaring a vector column.
-    This will change in the near future.
+this branch: https://github.com/datastax/cassandra/tree/vsearch
+  - TLDR `git clone`, `git checkout vsearch`, `ant jar`, `bin/cassandra -f`
 - JDK 11.  Exactly 11.
 - You will be able to run cqlsh with vector support if you run `bin/cqlsh` from the cassandra source root
 - You can install the Python dependencies for cassgpt by running 

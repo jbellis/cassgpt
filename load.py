@@ -26,7 +26,7 @@ def main():
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
 
-    num_threads = 8
+    num_threads = 32
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         list(tqdm(executor.map(upsert_row, data), total=len(data)))
 
