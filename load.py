@@ -25,11 +25,13 @@ def main():
     get_db_handle() # let one thread create the table + index
     time.sleep(1)
 
+    print("Reading data")
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
-    random.shuffle(data)
+    random.shuffle(data);  # avoid saturating a single memtable shard
 
-    num_threads = 32
+    print("Importing data")
+    num_threads = 64
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         list(tqdm(executor.map(upsert_row, data), total=len(data)))
 
