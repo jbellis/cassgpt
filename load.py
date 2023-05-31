@@ -4,6 +4,7 @@ from cassandra.cluster import Cluster
 from db import DB
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor
+import random
 import threading
 import time
 
@@ -23,8 +24,10 @@ def main():
     print("Waiting for Cassandra schema")
     get_db_handle() # let one thread create the table + index
     time.sleep(1)
+
     with open('youtube_transcriptions.json', 'r') as f:
         data = json.load(f)
+    random.shuffle(data)
 
     num_threads = 32
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
