@@ -30,7 +30,7 @@ class DB:
             url text,
             published text,
             channel_id text,
-            embedding FLOAT VECTOR[1536]);
+            embedding vector<float, 1536>);
             """
         )
 
