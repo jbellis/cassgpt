@@ -74,7 +74,7 @@ class DB:
 
     def query(self, vector: List[float], top_k: int) -> List[str]:
         query = SimpleStatement(
-            f"SELECT id, start, end, text FROM {self.keyspace}.{self.table} WHERE embedding ANN OF %s LIMIT %s"
+            f"SELECT id, start, end, text FROM {self.keyspace}.{self.table} ORDER BY embedding ANN OF %s LIMIT %s"
         )
         res = self.session.execute(query, (vector, top_k))
         rows = [row for row in res]
